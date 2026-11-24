@@ -1,0 +1,25 @@
+{
+  "name": "quickfund-x",
+  "version": "2.0.0",
+  "private": true,
+  "description": "QuickFund-X — Privacy-Preserving Cross-Platform Loan Fraud Detection using Relational Graph Neural Networks (RGCN) & Hybrid Rule Intelligence",
+  "license": "MIT",
+  "scripts": {
+    "start:platforms": "python scripts/start_platforms.py",
+    "demo:reset": "python scripts/demo_reset.py",
+    "demo:attack": "python scripts/demo_attack.py",
+    "demo:attack:fast": "python scripts/demo_attack.py --duration 3 --count 16",
+    "demo:debugger": "streamlit run central-fraud-intelligence/debugger/streamlit_app.py",
+    "demo:integration": "python scripts/run_integration_demo.py",
+    "benchmark:ablation": "python scripts/run_ablation_study.py",
+    "benchmark:load": "python scripts/run_load_benchmark.py",
+    "benchmark:perf": "python scripts/run_performance_tests.py",
+    "test:platform-a": "npm --prefix loan-platform-a/backend test",
+    "test:platform-b": "npm --prefix loan-platform-b/backend test",
+    "test:platform-c": "npm --prefix loan-platform-c/backend test",
+    "test:platform-d": "npm --prefix loan-platform-d/backend test",
+    "test:platforms": "npm run test:platform-a && npm run test:platform-b && npm run test:platform-c && npm run test:platform-d",
+    "test:central": "python -m pytest central-fraud-intelligence/tests -q",
+    "test": "npm run test:platforms && npm run test:central"
+  }
+}

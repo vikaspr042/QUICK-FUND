@@ -1,0 +1,272 @@
+networks:
+  net-a-db:
+  net-b-db:
+  net-c-db:
+  net-d-db:
+  net-central-bus:      # loan platforms <-> event broker (Redis Streams/PubSub) <-> central app
+  net-central-db:       # central app <-> its own database only
+
+services:
+  # ---------------------------------------------------------------------
+  # Event-Driven Broker — Redis Streams & Pub/Sub Bus
+  # ---------------------------------------------------------------------
+  redis-broker:
+    image: redis:7-alpine
+    container_name: redis-broker
+    restart: unless-stopped
+    networks: [net-central-bus]
+    ports: ["${REDIS_BROKER_PORT:-6379}:6379"]
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes: [redis-broker-data:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  # ---------------------------------------------------------------------
+  # Loan Platform A — QuickFund
+  # ---------------------------------------------------------------------
+  mongo-loan-a:
+    image: mongo:7
+    container_name: mongo-loan-a
+    restart: unless-stopped
+    networks: [net-a-db]
+    ports: ["${LOAN_A_MONGO_PORT:-27018}:27017"]
+    volumes: [mongo-loan-a-data:/data/db]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  loan-platform-a:
+    build: ./loan-platform-a
+    container_name: loan-platform-a
+    restart: unless-stopped
+    depends_on:
+      mongo-loan-a:
+        condition: service_healthy
+      redis-broker:
+        condition: service_healthy
+    networks: [net-a-db, net-central-bus]
+    ports: ["${LOAN_A_PORT:-4001}:4000"]
+    environment:
+      PORT: 4000
+      APP_ENV: ${APP_ENV:-development}
+      PLATFORM_ID: a
+      PLATFORM_NAME: QuickFund
+      MONGO_URI: ${LOAN_A_MONGO_URI:-mongodb://mongo-loan-a:27017/loan_platform_a}
+      JWT_SECRET: ${LOAN_A_JWT_SECRET:-change-me-loan-platform-a-jwt-secret}
+      CENTRAL_FRAUD_API_URL: http://central-fraud-intelligence:5000
+      CENTRAL_FRAUD_API_KEY: ${LOAN_A_CENTRAL_API_KEY:-change-me-shared-secret-a}
+      REDIS_URL: ${REDIS_URL:-redis://redis-broker:6379/0}
+      EVENT_BROKER_MODE: ${EVENT_BROKER_MODE:-hybrid}
+      REDIS_EVENT_STREAM: ${REDIS_EVENT_STREAM:-quickfund:fraud:events}
+      REDIS_PUBSUB_CHANNEL: ${REDIS_PUBSUB_CHANNEL:-quickfund:fraud:pubsub}
+      # Phase 9: the SAME value on every loan platform AND the central app
+      # (never per-platform-suffixed) - see src/tokenization/tokenize.js's
+      # header comment for why cross-platform entity resolution requires
+      # this to be identical everywhere, not derived per service.
+      CENTRAL_HMAC_MASTER_KEY: ${CENTRAL_HMAC_MASTER_KEY:-change-me-32-byte-minimum-master-key-value}
+      CENTRAL_AES_KEY: ${CENTRAL_AES_KEY:-change-me-32-byte-aes-256-gcm-key}
+
+  # ---------------------------------------------------------------------
+  # Loan Platform B — TrustLend
+  # ---------------------------------------------------------------------
+  mongo-loan-b:
+    image: mongo:7
+    container_name: mongo-loan-b
+    restart: unless-stopped
+    networks: [net-b-db]
+    ports: ["${LOAN_B_MONGO_PORT:-27019}:27017"]
+    volumes: [mongo-loan-b-data:/data/db]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  loan-platform-b:
+    build: ./loan-platform-b
+    container_name: loan-platform-b
+    restart: unless-stopped
+    depends_on:
+      mongo-loan-b:
+        condition: service_healthy
+      redis-broker:
+        condition: service_healthy
+    networks: [net-b-db, net-central-bus]
+    ports: ["${LOAN_B_PORT:-4002}:4000"]
+    environment:
+      PORT: 4000
+      APP_ENV: ${APP_ENV:-development}
+      PLATFORM_ID: b
+      PLATFORM_NAME: TrustLend
+      MONGO_URI: ${LOAN_B_MONGO_URI:-mongodb://mongo-loan-b:27017/loan_platform_b}
+      JWT_SECRET: ${LOAN_B_JWT_SECRET:-change-me-loan-platform-b-jwt-secret}
+      CENTRAL_FRAUD_API_URL: http://central-fraud-intelligence:5000
+      CENTRAL_FRAUD_API_KEY: ${LOAN_B_CENTRAL_API_KEY:-change-me-shared-secret-b}
+      REDIS_URL: ${REDIS_URL:-redis://redis-broker:6379/0}
+      EVENT_BROKER_MODE: ${EVENT_BROKER_MODE:-hybrid}
+      REDIS_EVENT_STREAM: ${REDIS_EVENT_STREAM:-quickfund:fraud:events}
+      REDIS_PUBSUB_CHANNEL: ${REDIS_PUBSUB_CHANNEL:-quickfund:fraud:pubsub}
+      # Phase 9: shared with every platform + the central app - see
+      # loan-platform-a's comment above.
+      CENTRAL_HMAC_MASTER_KEY: ${CENTRAL_HMAC_MASTER_KEY:-change-me-32-byte-minimum-master-key-value}
+      CENTRAL_AES_KEY: ${CENTRAL_AES_KEY:-change-me-32-byte-aes-256-gcm-key}
+
+  # ---------------------------------------------------------------------
+  # Loan Platform C — SecureCredit
+  # ---------------------------------------------------------------------
+  mongo-loan-c:
+    image: mongo:7
+    container_name: mongo-loan-c
+    restart: unless-stopped
+    networks: [net-c-db]
+    ports: ["${LOAN_C_MONGO_PORT:-27020}:27017"]
+    volumes: [mongo-loan-c-data:/data/db]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  loan-platform-c:
+    build: ./loan-platform-c
+    container_name: loan-platform-c
+    restart: unless-stopped
+    depends_on:
+      mongo-loan-c:
+        condition: service_healthy
+      redis-broker:
+        condition: service_healthy
+    networks: [net-c-db, net-central-bus]
+    ports: ["${LOAN_C_PORT:-4003}:4000"]
+    environment:
+      PORT: 4000
+      APP_ENV: ${APP_ENV:-development}
+      PLATFORM_ID: c
+      PLATFORM_NAME: SecureCredit
+      MONGO_URI: ${LOAN_C_MONGO_URI:-mongodb://mongo-loan-c:27017/loan_platform_c}
+      JWT_SECRET: ${LOAN_C_JWT_SECRET:-change-me-loan-platform-c-jwt-secret}
+      CENTRAL_FRAUD_API_URL: http://central-fraud-intelligence:5000
+      CENTRAL_FRAUD_API_KEY: ${LOAN_C_CENTRAL_API_KEY:-change-me-shared-secret-c}
+      REDIS_URL: ${REDIS_URL:-redis://redis-broker:6379/0}
+      EVENT_BROKER_MODE: ${EVENT_BROKER_MODE:-hybrid}
+      REDIS_EVENT_STREAM: ${REDIS_EVENT_STREAM:-quickfund:fraud:events}
+      REDIS_PUBSUB_CHANNEL: ${REDIS_PUBSUB_CHANNEL:-quickfund:fraud:pubsub}
+      # Phase 9: shared with every platform + the central app - see
+      # loan-platform-a's comment above.
+      CENTRAL_HMAC_MASTER_KEY: ${CENTRAL_HMAC_MASTER_KEY:-change-me-32-byte-minimum-master-key-value}
+      CENTRAL_AES_KEY: ${CENTRAL_AES_KEY:-change-me-32-byte-aes-256-gcm-key}
+
+  # ---------------------------------------------------------------------
+  # Loan Platform D — FinBridge
+  # ---------------------------------------------------------------------
+  mongo-loan-d:
+    image: mongo:7
+    container_name: mongo-loan-d
+    restart: unless-stopped
+    networks: [net-d-db]
+    ports: ["${LOAN_D_MONGO_PORT:-27021}:27017"]
+    volumes: [mongo-loan-d-data:/data/db]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  loan-platform-d:
+    build: ./loan-platform-d
+    container_name: loan-platform-d
+    restart: unless-stopped
+    depends_on:
+      mongo-loan-d:
+        condition: service_healthy
+      redis-broker:
+        condition: service_healthy
+    networks: [net-d-db, net-central-bus]
+    ports: ["${LOAN_D_PORT:-4004}:4000"]
+    environment:
+      PORT: 4000
+      APP_ENV: ${APP_ENV:-development}
+      PLATFORM_ID: d
+      PLATFORM_NAME: FinBridge
+      MONGO_URI: ${LOAN_D_MONGO_URI:-mongodb://mongo-loan-d:27017/loan_platform_d}
+      JWT_SECRET: ${LOAN_D_JWT_SECRET:-change-me-loan-platform-d-jwt-secret}
+      CENTRAL_FRAUD_API_URL: http://central-fraud-intelligence:5000
+      CENTRAL_FRAUD_API_KEY: ${LOAN_D_CENTRAL_API_KEY:-change-me-shared-secret-d}
+      REDIS_URL: ${REDIS_URL:-redis://redis-broker:6379/0}
+      EVENT_BROKER_MODE: ${EVENT_BROKER_MODE:-hybrid}
+      REDIS_EVENT_STREAM: ${REDIS_EVENT_STREAM:-quickfund:fraud:events}
+      REDIS_PUBSUB_CHANNEL: ${REDIS_PUBSUB_CHANNEL:-quickfund:fraud:pubsub}
+      # Phase 9: shared with every platform + the central app - see
+      # loan-platform-a's comment above.
+      CENTRAL_HMAC_MASTER_KEY: ${CENTRAL_HMAC_MASTER_KEY:-change-me-32-byte-minimum-master-key-value}
+      CENTRAL_AES_KEY: ${CENTRAL_AES_KEY:-change-me-32-byte-aes-256-gcm-key}
+
+  # ---------------------------------------------------------------------
+  # Central Fraud Intelligence + GNN application (ONE app — never split)
+  # ---------------------------------------------------------------------
+  central-db:
+    image: postgres:16-alpine
+    container_name: central-db
+    restart: unless-stopped
+    networks: [net-central-db]
+    ports: ["${CENTRAL_DB_PORT:-5433}:5432"]
+    volumes: [central-db-data:/var/lib/postgresql/data]
+    environment:
+      POSTGRES_USER: ${CENTRAL_DB_USER:-quickfundx}
+      POSTGRES_PASSWORD: ${CENTRAL_DB_PASSWORD:-change-me-central-db-password}
+      POSTGRES_DB: ${CENTRAL_DB_NAME:-central_fraud_intelligence}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${CENTRAL_DB_USER:-quickfundx} -d ${CENTRAL_DB_NAME:-central_fraud_intelligence}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  central-fraud-intelligence:
+    build: ./central-fraud-intelligence
+    container_name: central-fraud-intelligence
+    restart: unless-stopped
+    depends_on:
+      central-db:
+        condition: service_healthy
+      redis-broker:
+        condition: service_healthy
+    networks: [net-central-bus, net-central-db]
+    ports: ["${CENTRAL_PORT:-5000}:5000"]
+    environment:
+      PORT: 5000
+      APP_ENV: ${APP_ENV:-development}
+      CENTRAL_DB_URI: ${CENTRAL_DB_URI:-postgresql://quickfundx:change-me-central-db-password@central-db:5432/central_fraud_intelligence}
+      REDIS_URL: ${REDIS_URL:-redis://redis-broker:6379/0}
+      EVENT_BROKER_MODE: ${EVENT_BROKER_MODE:-hybrid}
+      REDIS_EVENT_STREAM: ${REDIS_EVENT_STREAM:-quickfund:fraud:events}
+      REDIS_PUBSUB_CHANNEL: ${REDIS_PUBSUB_CHANNEL:-quickfund:fraud:pubsub}
+      CENTRAL_HMAC_MASTER_KEY: ${CENTRAL_HMAC_MASTER_KEY:-change-me-32-byte-minimum-master-key-value}
+      CENTRAL_AES_KEY: ${CENTRAL_AES_KEY:-change-me-32-byte-aes-256-gcm-key}
+      CENTRAL_JWT_SECRET: ${CENTRAL_JWT_SECRET:-change-me-central-jwt-secret}
+      CENTRAL_ACCEPTS_API_KEY_A: ${CENTRAL_ACCEPTS_API_KEY_A:-change-me-shared-secret-a}
+      CENTRAL_ACCEPTS_API_KEY_B: ${CENTRAL_ACCEPTS_API_KEY_B:-change-me-shared-secret-b}
+      CENTRAL_ACCEPTS_API_KEY_C: ${CENTRAL_ACCEPTS_API_KEY_C:-change-me-shared-secret-c}
+      CENTRAL_ACCEPTS_API_KEY_D: ${CENTRAL_ACCEPTS_API_KEY_D:-change-me-shared-secret-d}
+      PLATFORM_A_BASE_URL: ${PLATFORM_A_BASE_URL:-http://loan-platform-a:4000}
+      PLATFORM_B_BASE_URL: ${PLATFORM_B_BASE_URL:-http://loan-platform-b:4000}
+      PLATFORM_C_BASE_URL: ${PLATFORM_C_BASE_URL:-http://loan-platform-c:4000}
+      PLATFORM_D_BASE_URL: ${PLATFORM_D_BASE_URL:-http://loan-platform-d:4000}
+
+volumes:
+  redis-broker-data:
+  mongo-loan-a-data:
+  mongo-loan-b-data:
+  mongo-loan-c-data:
+  mongo-loan-d-data:
+  central-db-data:

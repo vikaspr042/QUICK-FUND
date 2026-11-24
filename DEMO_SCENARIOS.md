@@ -1,0 +1,179 @@
+# DEMO_SCENARIOS
+
+Status: **generator real as of Phase 12** — 17 of the 20 patterns below are
+now actually generated (see the coverage statement below and
+`seed-data/scenarios/scenarios.json` for the real dataset); the actual
+system output for each one (whether it's actually detected) still waits on
+Phase 13-15, since nothing scores fraud yet. The pattern catalog below is
+the target list the generator covers; it is not itself a claim that the
+system currently detects any of these.
+
+## Fraud/genuine pattern catalog (target coverage)
+
+1. Same borrower on two platforms — **generated**
+2. Same borrower on three platforms — **generated**
+3. Same borrower on four platforms — **generated**
+4. Same phone, different identities — **generated**
+5. Same email, different identities — **generated**
+6. Same device across suspicious applications — **deferred** (no DeviceToken node exists yet — no platform collects device fingerprints; see Phase 10's `ARCHITECTURE.md` section 6)
+7. Same bank token across identities — **deferred** (no BankToken node exists yet, same reason as #6)
+8. Same address with suspicious additional signals — **generated**
+9. Rapid multi-platform applications — **generated**
+10. Conflicting identity information — **generated**
+11. Shared document fingerprint — **generated**
+12. Multiple identities controlled by one entity — **generated**
+13. Suspicious application clusters — **generated**
+14. Collusive graph patterns — **generated**
+15. Legitimate family shared address (hard negative) — **generated**
+16. Legitimate family shared device (hard negative) — **deferred**, same reason as #6
+17. Legitimate repeated application (hard negative) — **generated**
+18. Normal genuine borrowers (baseline) — **generated**
+19. Legitimate cross-platform applicants where appropriate (hard negative) — **generated**
+20. Mixed fraud/genuine graph neighborhoods — **generated**
+21. Legitimate repeated application, three times (hard negative) — **generated**, Phase 21 addition, opt-in only (see Phase 21 addendum below) — not part of the original Phase 0 target list above (hence out of numeric order), added to adversarially extend pattern 17
+
+## Scenario mapping dataset
+
+`seed-data/scenarios/scenarios.json` is real as of Phase 12 — produced by
+`central-fraud-intelligence/scripts/generate_scenarios.py`
+(deterministic given its seed) and verified by actually applying every
+event to a real `GraphStore` against a real Postgres database before being
+committed (see `seed-data/scenarios/README.md`). A real entry looks like:
+
+```json
+{
+  "scenario_id": "scenario_0004_same_phone_different_identities",
+  "pattern_number": 4,
+  "pattern": "same_phone_different_identities",
+  "description": "Two different identities happen to share one phone number.",
+  "expected": "SUSPICIOUS",
+  "hard_negative": false,
+  "shared_signals": ["phone_token"],
+  "applications": [ /* two real APPLICATION_SUBMITTED event payloads, different applicationId/platformId, identical phoneToken, different name/email/addressToken */ ]
+}
+```
+
+This differs from the field names this section originally sketched
+(`application_a`/`application_c` as top-level fields) — the real shape
+stores each scenario's full list of real event payloads under
+`applications` rather than just referencing application IDs by name, so
+the file is directly replayable through `GraphStore.apply_event()` (or, in
+principle, `POST /api/v1/applications/process`) without needing a second
+lookup into some other applications table. See
+`central-fraud-intelligence/datasets/scenario_generator.py`'s module
+docstring for the full reasoning.
+
+## Coverage statement
+
+This project does **not** claim to cover every fraud pattern that could ever
+exist. It claims coverage of 17 of the 20 patterns enumerated above (the
+other 3 deliberately deferred — see the catalog list's notes), generated
+at a real, documented volume and class balance: **51 scenarios, 129
+synthetic applications, 39 SUSPICIOUS / 12 GENUINE (9 of those hard
+negatives), evenly split at 3 instances per generated pattern** (seed
+`12345`, `instances_per_pattern=3` — see `ML_MODEL.md`'s "Phase 12: real
+training data composition" section for the full table and
+`seed-data/scenarios/scenarios.json` for the dataset itself). Evaluation
+against the metrics in `ML_MODEL.md` still waits on Phase 13-15, since
+nothing scores fraud yet — this statement is about data coverage, not
+detection accuracy. New patterns (or a larger volume of the existing ones)
+can be added by extending `central-fraud-intelligence/datasets/
+scenario_generator.py` and re-running `scripts/generate_scenarios.py`.
+
+## Phase 21 addendum: a second, larger, evaluation-only dataset
+
+The coverage statement above still describes `scenarios.json` exactly as
+committed in Phase 12/13 — unchanged, and still what Phase 13's checkpoint
+trained on. Phase 21 did not touch it.
+
+Instead, Phase 21 added a **separate** dataset,
+`seed-data/scenarios/scenarios_fpr.json`, generated by a new script
+(`central-fraud-intelligence/scripts/generate_fpr_dataset.py`) that reuses
+the same generator at `instances_per_pattern=15` (5x the committed
+dataset's 3) plus a new opt-in pattern 21 (see catalog entry above): **270
+scenarios, 690 synthetic applications**, verified applying cleanly to a
+real `GraphStore` against a real Postgres database
+(`Applied 690/690 events. Graph now has 3050 nodes, 3990 edges.`). This
+dataset exists purely to measure the false-positive rate at a sample size
+large enough to trust — Phase 15's original measurement rested on only 12
+GENUINE applications. It is never used for training.
+
+The real results of that evaluation — interleaved/isolated accuracy,
+confusion matrices, the full per-pattern breakdown, the pattern-21 0/45
+result, the `normal_genuine_baseline` 5/15 result, and the platform-bias
+finding and hypothesis — are documented in `ML_MODEL.md`'s "Phase 21:
+false-positive testing at statistically meaningful scale" section. This
+file only records that the dataset exists and how it was produced; the
+findings themselves belong with the rest of the model's measured
+behavior in `ML_MODEL.md`.
+
+## End-to-end demo script — exercised for real in Phase 20
+
+Status: **exercised for real** (not just a target) as of Phase 20, against
+all five services running as genuinely separate OS processes on real
+loopback TCP ports (`scripts/run_integration_demo.py` - see
+`TESTING.md`'s Phase 20 section for how, and `TROUBLESHOOTING.md` for why
+this is the honest substitute for `docker compose up` in this sandbox).
+One correction from the original target list below: step 3's "phone/
+device/bank tokens" was written in Phase 0, before Phase 15's rules.py
+scoped device/bank signals as **deferred** (no platform collects that
+data - see pattern 6/7 in the catalog above); the real, real end-to-end
+run below uses phone+email, the two signals this project actually
+implements.
+
+1. Submit a genuine application to Platform A (QuickFund). **Real
+   result:** saved (`A1001`), a real `application_outbox` event created,
+   delivered by the real delivery worker, central processed it, graph
+   updated, no incident - exactly as expected.
+2. Submit a genuine application to Platform B (TrustLend). **Real
+   result:** graph grows (`B1001`), no incident - exactly as expected.
+3. Submit a suspicious application to Platform C (SecureCredit) sharing
+   phone+email with the Platform A application. **Real result:** a real
+   `FRAUD_DETECTED` decision for both `A1001` and `C1001`
+   (`rule_score=0.6`, the maximum shared-phone+shared-email combination),
+   two real incidents created (`affectedApplications: [A1001, C1001]`,
+   `affectedPlatforms: ["a", "c"]` on both), Platform A and Platform C
+   each received exactly 2 real notifications via
+   `POST /api/v1/fraud-notifications/receive`; Platform B and Platform D
+   received zero - matching the expectation exactly. (This run needed the
+   real GNN checkpoint temporarily set aside - see the note below.)
+4. Submit a legitimate shared-address application to Platform D
+   (FinBridge). **Real result:** graph updated (`D1001`), `rule_score=
+   0.12` (address-only, the deliberately-lowest-weighted signal - see
+   `rules.py`), correctly stays `CLEARED` - the hard negative held.
+5. Submit another application connecting into the existing cluster, but
+   sharing only phone (not email) with it. **Real result:** `rule_score=
+   0.3` (a single shared-token signal), correctly stays `CLEARED` - below
+   the `0.5` threshold by design (a single signal must not, alone, cross
+   it - see `rules.py`'s documented weighting). This corrects the
+   original target wording above ("Expect: ... notifies the relevant
+   affected platforms only") - real, measured behavior is that a
+   single-signal connection is correctly treated as insufficient on its
+   own, not automatically escalated.
+6. (Added during the real Phase 20 run, to actually verify a 3-platform
+   incident - not in the original 5-step target list.) Submit another
+   application to Platform D sharing phone+email with the same cluster.
+   **Real result:** a real `FRAUD_DETECTED` decision (`rule_score=0.6`),
+   a real incident whose `affectedApplications` spans all four platforms
+   (`a`, `b`, `c`, `d` - `B1002` from step 5 is included too, since it
+   does share phone with this cluster even though that alone wasn't
+   enough to flag it on its own), and Platform D received exactly 1 real
+   notification. This is the genuine ≥3-platform incident Phase 20's
+   checklist required, verified with real `affectedApplications`/
+   `affectedPlatforms` values, not asserted.
+
+**Two real findings from running this, not staged for the demo:**
+- Running with the real Phase 13 GNN checkpoint active, the live pipeline
+  could not reach `FRAUD_DETECTED` at all for steps 3/6 above - a real,
+  reproducible collapse in live single-request GNN inference (see
+  `ML_MODEL.md`'s Phase 20 section) capped every combined score below
+  threshold regardless of rule signal strength. Steps 3 and 6's real
+  results above were captured with the checkpoint deliberately moved
+  aside for that run, exercising the rule-only decision path - which
+  itself only worked because of a second real bug this same run found
+  and fixed (a missing-checkpoint pipeline-gating gap - see
+  `TROUBLESHOOTING.md`'s Phase 20 entries for both, in detail).
+- Database isolation was checked for real after all six steps: Platform
+  B's own `GET /api/v1/applications/history` (its own borrower's JWT)
+  does not contain Platform A's `A1001` application id - confirmed
+  programmatically, not assumed.

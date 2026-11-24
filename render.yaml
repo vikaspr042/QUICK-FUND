@@ -1,0 +1,47 @@
+# Render Cloud-Native Staging Blueprint for QuickFund-X
+# Deploy with 1 click: https://render.com/deploy
+services:
+  - type: web
+    name: quickfund-x-central-intelligence
+    env: docker
+    dockerfilePath: ./central-fraud-intelligence/Dockerfile
+    dockerContext: ./central-fraud-intelligence
+    plan: free
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: quickfund-x-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: quickfund-x-redis-broker
+          property: connectionString
+      - key: EVENT_BROKER_MODE
+        value: hybrid
+      - key: ADMIN_JWT_SECRET
+        generateValue: true
+      - key: ADMIN_SEED_EMAIL
+        value: admin@quickfund-x.example
+      - key: ADMIN_SEED_PASSWORD
+        value: QuickFundX-Staging-2026!
+      - key: PLATFORM_A_API_KEY
+        value: qfx-live-key-platform-a
+      - key: PLATFORM_B_API_KEY
+        value: qfx-live-key-platform-b
+      - key: PLATFORM_C_API_KEY
+        value: qfx-live-key-platform-c
+      - key: PLATFORM_D_API_KEY
+        value: qfx-live-key-platform-d
+
+  - type: redis
+    name: quickfund-x-redis-broker
+    plan: free
+    ipAllowList: []
+
+databases:
+  - name: quickfund-x-postgres
+    databaseName: central_fraud_intelligence
+    user: quickfundx
+    plan: free

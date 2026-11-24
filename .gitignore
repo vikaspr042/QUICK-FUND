@@ -1,0 +1,24 @@
+# Node
+node_modules/
+dist/
+frontend/dist/
+backend/public/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# ML artifacts (large binaries; tracked separately if needed later)
+central-fraud-intelligence/models/*.pt
+central-fraud-intelligence/models/*.pth
+central-fraud-intelligence/datasets/*.csv
+
+# Env
+.env
+*.env.local
+
+# OS / editor
+.DS_Store
+*.log
